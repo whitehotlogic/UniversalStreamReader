@@ -5,7 +5,8 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 
-using System.Threading.Tasks; // will be used soon
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace UniversalStreamReader
 {
@@ -14,14 +15,22 @@ namespace UniversalStreamReader
         static void Main(string[] args)
         {
 
+            const string PERSISTENCE_FILE = @"c:\tempDev\InMemoryCacheWithPersist.txt";
+
             //initialize cache
-            InMemoryCacheWithPersist imcwp = new InMemoryCacheWithPersist("c:\\tempDev\\InMemoryCacheWithPersist.txt");
+            InMemoryCacheWithPersist imcwp = new InMemoryCacheWithPersist(PERSISTENCE_FILE);
 
             //create background thread to manage the cache's ringbuffer policy
-            //Parallel.Invoke(() => imcwp.ringBufferPolicer(1,1)); // Parallel.Invoke for best threading readability in this use case
+            Parallel.Invoke(() => imcwp.ringBufferPolicer(1,3)); // Parallel.Invoke for best threading readability in this use case
 
-            imcwp.add("topic4", "message1", DateTime.Now);
 
+            // add some dummy topics and messages for testing
+            for (int i = 0; i <= 10; i++)
+            {
+                imcwp.add("topic3", "message3", DateTime.Now);
+                Task.Delay(TimeSpan.FromSeconds(0.5)).Wait();
+            }
+           
             Console.Out.WriteLine("debug: new message added"); // not doing anything now that the data is in correct formate
 
             //on close, persist to disk
@@ -165,7 +174,30 @@ namespace UniversalStreamReader
             while (true)
             {
                 //for(each topic in cache, get messages count)
+                foreach(KeyValuePair<string,Dictionary<DateTime,string>> kvp in this.cache)
                 {
+                    string topic = kvp.Key;
+
+                    Console.Out.WriteLine(topic);
+                    Task.Delay(TimeSpan.FromSeconds(1)).Wait();
+
+                    Dictionary<DateTime, string> messages = kvp.Value; // just for ease of readability
+
+                    if (messages.Count > expiryValue) // then expire the messages, (assuming count for current testing purposes)
+                    {
+
+                        int expiredCount = messages.Count - expiryValue; // get the number of messages to remove
+
+                        //sort the dictionary, take the top X values
+                        messages = messages.OrderBy(pair => pair.Value).Take(expiryValue)
+                                                                       .ToDictionary(pair => pair.Key, pair => pair.Value);
+
+                        //remove the expired values by reassigning the trimmed dictionary to the cache 
+                        this.cache[topic] = messages;
+
+                        Console.Out.WriteLine("Debug: Found and removed " + expiredCount + " expired messages for topic: " + topic);
+
+                    }
 
                 }
             }
