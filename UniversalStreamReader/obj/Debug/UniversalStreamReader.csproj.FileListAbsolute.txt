@@ -1,0 +1,7 @@
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\UniversalStreamReader.exe.config
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\UniversalStreamReader.exe
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\UniversalStreamReader.pdb
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\obj\Debug\UniversalStreamReader.csprojResolveAssemblyReference.cache
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\obj\Debug\UniversalStreamReader.csproj.CoreCompileInputs.cache
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\obj\Debug\UniversalStreamReader.exe
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\obj\Debug\UniversalStreamReader.pdb
