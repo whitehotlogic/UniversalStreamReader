@@ -7,3 +7,17 @@ C:\tempDev\UniversalStreamReader\UniversalStreamReader\obj\Debug\UniversalStream
 C:\tempDev\UniversalStreamReader\UniversalStreamReader\obj\Debug\UniversalStreamReader.pdb
 C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\Dapper.dll
 C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\Dapper.xml
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x86\librdkafka.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x86\librdkafka.lib
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x86\librdkafkacpp.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x86\librdkafkacpp.lib
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x86\msvcr120.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x86\zlib.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\librdkafka.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\librdkafka.lib
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\librdkafkacpp.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\librdkafkacpp.lib
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\msvcr120.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\zlib.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\Confluent.Kafka.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\Confluent.Kafka.xml

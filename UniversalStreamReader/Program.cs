@@ -5,8 +5,17 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 
+// for the ring buffer -- am i doing this wrong by using threads? do i even fully understand a ring buffer? look into it further.
 using System.Threading.Tasks;
 using System.Linq;
+
+// for the kafka consumer (using confluent c# wrapper for librdkafka C client)
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Confluent.Kafka.Serialization;
+using Confluent.Kafka;
 
 namespace UniversalStreamReader
 {
@@ -16,16 +25,34 @@ namespace UniversalStreamReader
         {
 
             const string PERSISTENCE_FILE = @"c:\tempDev\InMemoryCacheWithPersist.txt";
+            const string BOOTSTRAP_SERVERS = "192.168.1.118:9092";
+            List<string> topicsToConsume = new List<string>();
+            topicsToConsume.Add("testaroo");
+            //topicsToConsume.Add("dummytopic1");
+            //topicsToConsume.Add("dummytopic5");
+            //topicsToConsume.Add("dummytopic6");
 
-            //initialize cache
+
+            //initialize in-memory cache
             InMemoryCacheWithPersist imcwp = new InMemoryCacheWithPersist(PERSISTENCE_FILE);
 
+
             //create background thread to manage the cache's ringbuffer policy
-            //Parallel.Invoke(() => imcwp.ringBufferPolicer(1,3)); // Parallel.Invoke for best threading readability in this use case
             Task.Factory.StartNew(() => imcwp.ringBufferPolicer(1, 3));
 
 
-            // add some dummy topics and messages for testing
+            //create background thread to consume kafka cluster
+            Task.Factory.StartNew(() => StreamConsumer_Kafka.Run_Poll(BOOTSTRAP_SERVERS, topicsToConsume));
+           
+            while (true)
+            {
+                // keep the main thread open for testing
+                Task.Delay(TimeSpan.FromMilliseconds(1000)).Wait();
+            }
+
+
+            /*
+            // add some dummy topics and messages to the in-memorycache for testing concurrency
             int i = 0;
             while (true)
             {
@@ -36,15 +63,16 @@ namespace UniversalStreamReader
                     imcwp.add(topic, message, DateTime.Now);
                 }
                 
-                Task.Delay(TimeSpan.FromSeconds(0.1)).Wait();
+                //Task.Delay(TimeSpan.FromSeconds(0.1)).Wait();
 
                 //on close, persist to disk
                 imcwp.persist();
 
                 i++;
             }
+            */
 
-            Task.Delay(TimeSpan.FromSeconds(10)).Wait(); // so i can see the output for now
+            Task.Delay(TimeSpan.FromSeconds(5)).Wait(); // so i can see the output for now
 
         }
     }
@@ -74,6 +102,115 @@ namespace UniversalStreamReader
         public string Value { get; set; }
     }
 
+    /**
+     * 
+     * 
+     * 
+     * 
+     *    Kafka Consumer
+     * 
+     * 
+     * 
+     * 
+     */
+
+    class StreamConsumer_Kafka { 
+
+        private static Dictionary<string, object> constructConfig(string brokerList, bool enableAutoCommit) =>
+                                                                                new Dictionary<string, object>
+        {
+                    { "group.id", "sd34243asd" }, // change the group.id to get all messages for the topic from beginning of time
+                    { "enable.auto.commit", enableAutoCommit },
+                    { "auto.commit.interval.ms", 5000 },
+                    { "statistics.interval.ms", 60000 }, // why am i doing this?
+                    { "bootstrap.servers", brokerList },
+                    { "default.topic.config", new Dictionary<string, object>()
+                        {
+                            { "auto.offset.reset", "smallest" }
+                        }
+                    }
+        };
+
+        /// <summary>
+        //      In this example:
+        ///         - offsets are auto commited.
+        ///         - consumer.Poll / OnMessage is used to consume messages.
+        ///         - no extra thread is created for the Poll loop.
+        /// </summary>
+        public static void Run_Poll(string brokerList, List<string> topics)
+        {
+            //using (var consumer = new Consumer<Null, string>(constructConfig(brokerList, true), IDeserializer<string>, new StringDeserializer(Encoding.UTF8)))
+            using (var consumer = new Consumer<string, string>(constructConfig(brokerList, true), new StringDeserializer(Encoding.UTF8), new StringDeserializer(Encoding.UTF8)))
+            {
+                // Note: All event handlers are called on the main thread.
+
+                consumer.OnMessage += (_, msg)
+                    => Console.WriteLine($"Topic: {msg.Topic} Partition: {msg.Partition} Offset: {msg.Offset} {msg.Value}");
+
+                consumer.OnPartitionEOF += (_, end)
+                    => Console.WriteLine($"Reached end of topic {end.Topic} partition {end.Partition}, next message will be at offset {end.Offset}");
+
+                consumer.OnError += (_, error)
+                    => Console.WriteLine($"Error: {error}");
+
+                consumer.OnConsumeError += (_, msg)
+                    => Console.WriteLine($"Error consuming from topic/partition/offset {msg.Topic}/{msg.Partition}/{msg.Offset}: {msg.Error}");
+
+                consumer.OnOffsetsCommitted += (_, commit) =>
+                {
+                    Console.WriteLine($"[{string.Join(", ", commit.Offsets)}]");
+
+                    if (commit.Error)
+                    {
+                        Console.WriteLine($"Failed to commit offsets: {commit.Error}");
+                    }
+                    Console.WriteLine($"Successfully committed offsets: [{string.Join(", ", commit.Offsets)}]");
+                };
+
+                consumer.OnPartitionsAssigned += (_, partitions) =>
+                {
+                    Console.WriteLine($"Assigned partitions: [{string.Join(", ", partitions)}], member id: {consumer.MemberId}");
+                    consumer.Assign(partitions);
+                };
+
+                consumer.OnPartitionsRevoked += (_, partitions) =>
+                {
+                    Console.WriteLine($"Revoked partitions: [{string.Join(", ", partitions)}]");
+                    consumer.Unassign();
+                };
+
+                // output periodic statistics for debug purposes
+                //consumer.OnStatistics += (_, json)
+                //    => Console.WriteLine($"Statistics: {json}");
+
+                consumer.Subscribe(topics);
+
+                Console.WriteLine($"Subscribed to: [{string.Join(", ", consumer.Subscription)}]");
+
+               
+
+                var cancelled = false;
+                Console.CancelKeyPress += (_, e) => {
+                    e.Cancel = true; // prevent the process from terminating.
+                    cancelled = true;
+                };
+
+                Console.WriteLine("Ctrl-C to exit.");
+                while (!cancelled)
+                {
+                    //Console.WriteLine("polling");
+                    consumer.Poll(TimeSpan.FromMilliseconds(100));
+                    
+                    
+                    /* Java way:
+                     * for (ConsumerRecord<String, String> record : records) // get all the messages and log them to console
+                     * System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value());
+                     * 
+                     * */
+                }
+            }
+        }
+    }
 
     /**
      * 
@@ -232,7 +369,7 @@ namespace UniversalStreamReader
             while (true)
             {
 
-                Console.Out.WriteLine("Loop of Background Thread");
+                //Console.Out.WriteLine("Loop of Background Thread");
                 //for(each topic in cache, get messages count)
                 foreach(KeyValuePair<string,Dictionary<DateTime,string>> kvp in this.cache)
                 {

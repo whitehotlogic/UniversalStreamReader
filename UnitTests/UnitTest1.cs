@@ -10,6 +10,11 @@ namespace UnitTests
      *      Code Coverage, 
      *      Cyclomatic Complexity
      *      Parameter Value Coverage
+     *      
+     *   Need at least 1 Unit Test per method   
+     *      
+     *   
+     *      
      */
 
     [TestClass]
