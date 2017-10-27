@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
@@ -21,24 +22,17 @@ namespace UniversalStreamReader
 {
     class Program
     {
+
         static void Main(string[] args)
         {
 
-            const string PERSISTENCE_FILE = @"c:\tempDev\InMemoryCacheWithPersist.txt";
+            const string DATABASE_FILE = @"c:\tempDev\AllData.sqlite";
             const string BOOTSTRAP_SERVERS = "192.168.1.118:9092";
             List<string> topicsToConsume = new List<string>();
             topicsToConsume.Add("testaroo");
             //topicsToConsume.Add("dummytopic1");
             //topicsToConsume.Add("dummytopic5");
             //topicsToConsume.Add("dummytopic6");
-
-
-            //initialize in-memory cache
-            InMemoryCacheWithPersist imcwp = new InMemoryCacheWithPersist(PERSISTENCE_FILE);
-
-
-            //create background thread to manage the cache's ringbuffer policy
-            Task.Factory.StartNew(() => imcwp.ringBufferPolicer(1, 3));
 
 
             //create background thread to consume kafka cluster
@@ -78,29 +72,9 @@ namespace UniversalStreamReader
     }
 
 
-    /**
-     * 
-     * 
-     * 
-     *    Topic, Message Objects, for ORM
-     * 
-     * 
-     * 
-     * 
-     */
 
-    class KafkaMessage
-    {
-        public int Id { get; set; }
-        public string Value { get; set; }
-        public DateTime Created { get; set; }
-    }
 
-    class KafkaTopic
-    {
-        public int Id { get; set; }
-        public string Value { get; set; }
-    }
+ 
 
     /**
      * 
@@ -114,7 +88,10 @@ namespace UniversalStreamReader
      * 
      */
 
-    class StreamConsumer_Kafka { 
+    class StreamConsumer_Kafka {
+
+        const string PERSISTENCE_FILE = @"c:\tempDev\CacheData.txt";
+        const int RINGBUFFER_SIZE = 10;
 
         private static Dictionary<string, object> constructConfig(string brokerList, bool enableAutoCommit) =>
                                                                                 new Dictionary<string, object>
@@ -131,21 +108,32 @@ namespace UniversalStreamReader
                     }
         };
 
-        /// <summary>
-        //      In this example:
-        ///         - offsets are auto commited.
-        ///         - consumer.Poll / OnMessage is used to consume messages.
-        ///         - no extra thread is created for the Poll loop.
-        /// </summary>
+
         public static void Run_Poll(string brokerList, List<string> topics)
         {
+
+            //initialize in-memory cache
+            InMemoryCacheWithFilePersist imcwfp = new InMemoryCacheWithFilePersist(RINGBUFFER_SIZE, PERSISTENCE_FILE);
+
             //using (var consumer = new Consumer<Null, string>(constructConfig(brokerList, true), IDeserializer<string>, new StringDeserializer(Encoding.UTF8)))
             using (var consumer = new Consumer<string, string>(constructConfig(brokerList, true), new StringDeserializer(Encoding.UTF8), new StringDeserializer(Encoding.UTF8)))
             {
                 // Note: All event handlers are called on the main thread.
 
-                consumer.OnMessage += (_, msg)
-                    => Console.WriteLine($"Topic: {msg.Topic} Partition: {msg.Partition} Offset: {msg.Offset} {msg.Value}");
+                // NEW MESSAGE FOUND FOR TOPIC!
+                consumer.OnMessage += (_, msg) =>
+                {
+
+                    
+                    Console.WriteLine($"NEW_MESSAGE: Topic: {msg.Topic} Partition: {msg.Partition} Offset: {msg.Offset} {msg.Value}");
+
+
+                    //write to in-memory cache
+                    imcwfp.addMessage(msg.Topic, msg.Value, DateTime.UtcNow);
+
+                    //write to DB
+
+                };
 
                 consumer.OnPartitionEOF += (_, end)
                     => Console.WriteLine($"Reached end of topic {end.Topic} partition {end.Partition}, next message will be at offset {end.Offset}");
@@ -225,107 +213,124 @@ namespace UniversalStreamReader
      */
 
 
-    class InMemoryCacheWithPersist
+    class InMemoryCacheWithFilePersist
     {
+
+
+
+
+
         //ConcurrentDictionary<string,List<KafkaMessage>> cache = null;
-        ConcurrentDictionary<string,Dictionary<DateTime,string>> cache = null; // use ConcurrentDictionary because it's thread-safe with atomic ops, and O(1)
+        //ConcurrentDictionary<string,Dictionary<DateTime,string>> cache = null; // use ConcurrentDictionary because it's thread-safe with atomic ops, and O(1)
+        //SortedDictionary<string,List<string,string>> cache = null;
+        string[,] stringArrayCache = null;
+
+
         private String persistenceFilePath = null;
 
-        public InMemoryCacheWithPersist(string persistenceFilePath)
+        private bool cacheIsFull = false;
+        private int indexToWrite = 0;
+        private int ringBufferSize;
+
+        public InMemoryCacheWithFilePersist(int ringBufferSize, string persistenceFilePath)
         {
 
-            this.cache = new ConcurrentDictionary<string,Dictionary<DateTime,string>>(); //for initial testing, use strings for key/value
+            //this.cache = new ConcurrentDictionary<string,Dictionary<DateTime,string>>(); //for initial testing, use strings for key/value
             //this.cache = new ConcurrentDictionary<string,List<KafkaMessage>>();
+            //this.cache = new SortedDictionary<string,string>();
+
+            this.ringBufferSize = ringBufferSize;
+            stringArrayCache = new string[ringBufferSize, 3]; // number of rows in array predefined by ringBufferSize
+                                                              // three strings are created, topic, message
+            
+
             this.persistenceFilePath = persistenceFilePath;
+
+
+            try // check and see if cache persistence file exists, and if not, create it
+            {
+                if (!File.Exists(persistenceFilePath))
+                {
+                    File.Create(persistenceFilePath).Dispose();
+                }
+            } catch (IOException e)
+            {
+                Console.WriteLine("ERROR: Could not create cache persistence file -- " + e.Message);
+            }
 
             try // will get FileNotFoundException if no cache available on disk
             {
                 using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Open))
                 {
-                    IFormatter bf = new BinaryFormatter();
+
+                    //assumes cache size in file matches cache size specified in RINGBUFFER_SIZE
+
+
                     //this.cache = (ConcurrentDictionary<string,List<KafkaMessage>>)bf.Deserialize(fileStream);
-                    this.cache = (ConcurrentDictionary<string,Dictionary<DateTime,string>>)bf.Deserialize(fileStream);
+                    //this.cache = (ConcurrentDictionary<string,Dictionary<DateTime,string>>)bf.Deserialize(fileStream);
+                    //this.cache = (OrderedDictionary)bf.Deserialize(fileStream); 
+                    //this.cache = (SortedDictionary<DateTime,string>) bf.Deserialize(fileStream);
+
+
+                    IFormatter bf = new BinaryFormatter();
+                    this.stringArrayCache = (string[,]) bf.Deserialize(fileStream); 
                     fileStream.Close();
+
+                    // sort by DateTime.UtcNow, so the oldest cache entry is at the beginning, and GO
+                    this.stringArrayCache = stringArrayCache.OrderBy(row => row[0]); // row[0] is the created (datetime.utcnow)
+
+
                 }
             }
             catch (FileNotFoundException e)
             {
-                Console.Out.WriteLine("Warning: Persistence File Not Found  -- " + e.Message);
+                Console.WriteLine("WARNING: Persistence File Not Found  -- " + e.Message);
             }
             catch (SerializationException e)
             {
-                Console.Out.WriteLine("Warning: Persistence File Empty or Corrupt  -- " + e.Message);
+                // if empty, just display warning
+                // if corrupt, display ERROR and quit program waiting 10secs for user to view error
+                Console.WriteLine("WARNING: Persistence File Empty or Corrupt  -- " + e.Message);
             }
             
-            Console.Out.WriteLine("INFO: In-Memory Cache Initialized with XXXX topics and XXXX messages");
 
-        }
-
-
-        public int size()
-        {
-            return this.cache.Count; // needed for ringbuffer byCount option? nope, this is wrong ---->
-                                              // ----> need to ringbuffer by message count per topic, not topic (key) count 
-        }
-
-
-        public Dictionary<DateTime, string> get(string topic)
-        {
-            if (this.cache.ContainsKey(topic))
-            {
-                return cache[topic] as Dictionary<DateTime, string>; // return all messages for this topic
-            } else
-            {
-                return new Dictionary<DateTime, string>(); // returning empty for testing only
-            }
             
-        }
 
-
-        public void add(string topic, string message, DateTime created)
-        {
-
-
-            Dictionary<DateTime,string> messages = this.get(topic); //get any existing messages in the cache for this topic
-            if (!messages.ContainsKey(created)) // make sure the same message isn't already there
-            {
-                messages.Add(created, message); //add the new message to the cache for this topic
-            }
-
-            this.cache[topic] = messages;
-
-            Console.Out.WriteLine("INFO: Message \"" + message + "\" added to topic \"" + topic + "\"");
-            /*
-            if (!this.cache.ContainsKey(topic))
-            {
-                this.cache.TryAdd(topic, messages); //should be using AddOrUpdate() of course, this is just for initial testing
-            }
-            */
-
-            // todo:
-            //this.cache.AddOrUpdate();
-            // if key/topic already exists, then update the messages
-        }
-
-
-        public void remove(string key, string value)
-        {
+            Console.WriteLine("INFO: In-Memory Cache Initialized with " + ringBufferSize + " records");
 
         }
 
-
-        public void persist()
+        public void addMessage(string topic, string message, DateTime created)
         {
-            //used a persist() method as a wrapper for invoking different persistence types 
-            //    -- did this for the extensibility factor 
-            //    -- assuming all persistent locations are synchronized
+
+            if (indexToWrite == ringBufferSize - 1) // if we've reached the end of the ringbuffer / cache
+                indexToWrite = 0;
+
+            this.stringArrayCache[indexToWrite, 0] = created.Ticks.ToString(); // gives me a sortable  column
+            this.stringArrayCache[indexToWrite, 1] = topic;
+            this.stringArrayCache[indexToWrite, 2] = message;
+
+            indexToWrite++; // set pointer to next index in the cache for next message write (seems ringbuffery to me)
+
+            Console.WriteLine("INFO: topic: \"" + topic + "\", with message: \"" + message + "\" has been added to cache at \"" + created.ToString() + "\"");
 
             serializedFilePersist();
 
-            sqliteDatabasePersist();
+            Console.WriteLine("INFO: Cache persisted to disk file");
 
+            
         }
 
+        public void serializedFilePersist()
+        {
+            using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
+            {
+                IFormatter bf = new BinaryFormatter();
+                bf.Serialize(fileStream, this.stringArrayCache);
+                fileStream.Close();
+            }
+
+        }
 
         public void sqliteDatabasePersist()
         {
@@ -349,18 +354,30 @@ namespace UniversalStreamReader
 
         }
 
-        public void serializedFilePersist()
+        /*
+        public int size()
         {
-            using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
-            {
-                IFormatter bf = new BinaryFormatter();
-                bf.Serialize(fileStream, this.cache);
-                fileStream.Close();
-            }
-
+            //return this.cache.Count; // needed for ringbuffer byCount option? nope, this is wrong ---->
+                                              // ----> need to ringbuffer by message count per topic, not topic (key) count 
         }
+        */
 
+        /*
+        public Dictionary<DateTime, string> getMessagesFromCacheForTopic(string topic)
+        {
+            //if (this.cache.ContainsKey(topic))
+            if (this.cache.Contains(topic))
+            {
+                return cache[topic] as Dictionary<DateTime, string>; // return all messages for this topic
+            } else
+            {
+                return new Dictionary<DateTime, string>(); // returning empty for testing only
+            }
+            
+        }
+        */
 
+        /*
         public void ringBufferPolicer (int policyType, int expiryValue)
         {
             //policyType==count, expiryValue==3      (remove oldest message if messagecount is > 100) 
@@ -369,14 +386,14 @@ namespace UniversalStreamReader
             while (true)
             {
 
-                //Console.Out.WriteLine("Loop of Background Thread");
+                //Console.WriteLine("Loop of Background Thread");
                 //for(each topic in cache, get messages count)
                 foreach(KeyValuePair<string,Dictionary<DateTime,string>> kvp in this.cache)
                 {
                     
                     string topic = kvp.Key;
 
-                    //Console.Out.WriteLine(topic);
+                    //Console.WriteLine(topic);
                     //Task.Delay(TimeSpan.FromSeconds(1)).Wait();
 
                     Dictionary<DateTime, string> messages = kvp.Value; // just for ease of readability
@@ -393,15 +410,116 @@ namespace UniversalStreamReader
                         //remove the expired values by reassigning the trimmed dictionary to the cache 
                         this.cache[topic] = messages;
 
-                        Console.Out.WriteLine("INFO: RingbuffPolicer found and removed " + expiredCount + " expired messages for topic: " + topic);
+                        Console.WriteLine("INFO: RingbuffPolicer found and removed " + expiredCount + " expired messages for topic: " + topic);
 
                     }
 
                 }
             }
+     
 
 
         }
+        */
+
+
+
+
+
+    }
+
+    public static class MultiDimensionalArrayExtensions
+    {
+        /// <summary>
+        ///   Orders the two dimensional array by the provided key in the key selector.
+        /// </summary>
+        /// <typeparam name="T">The type of the source two-dimensional array.</typeparam>
+        /// <param name="source">The source two-dimensional array.</param>
+        /// <param name="keySelector">The selector to retrieve the column to sort on.</param>
+        /// <returns>A new two dimensional array sorted on the key.</returns>
+        public static T[,] OrderBy<T>(this T[,] source, Func<T[], T> keySelector)
+        {
+            return source.ConvertToSingleDimension().OrderBy(keySelector).ConvertToMultiDimensional();
+        }
+        /// <summary>
+        ///   Orders the two dimensional array by the provided key in the key selector in descending order.
+        /// </summary>
+        /// <typeparam name="T">The type of the source two-dimensional array.</typeparam>
+        /// <param name="source">The source two-dimensional array.</param>
+        /// <param name="keySelector">The selector to retrieve the column to sort on.</param>
+        /// <returns>A new two dimensional array sorted on the key.</returns>
+        public static T[,] OrderByDescending<T>(this T[,] source, Func<T[], T> keySelector)
+        {
+            return source.ConvertToSingleDimension().
+                OrderByDescending(keySelector).ConvertToMultiDimensional();
+        }
+        /// <summary>
+        ///   Converts a two dimensional array to single dimensional array.
+        /// </summary>
+        /// <typeparam name="T">The type of the two dimensional array.</typeparam>
+        /// <param name="source">The source two dimensional array.</param>
+        /// <returns>The repackaged two dimensional array as a single dimension based on rows.</returns>
+        private static IEnumerable<T[]> ConvertToSingleDimension<T>(this T[,] source)
+        {
+            T[] arRow;
+
+            for (int row = 0; row < source.GetLength(0); ++row)
+            {
+                arRow = new T[source.GetLength(1)];
+
+                for (int col = 0; col < source.GetLength(1); ++col)
+                    arRow[col] = source[row, col];
+
+                yield return arRow;
+            }
+        }
+        /// <summary>
+        ///   Converts a collection of rows from a two dimensional array back into a two dimensional array.
+        /// </summary>
+        /// <typeparam name="T">The type of the two dimensional array.</typeparam>
+        /// <param name="source">The source collection of rows to convert.</param>
+        /// <returns>The two dimensional array.</returns>
+        private static T[,] ConvertToMultiDimensional<T>(this IEnumerable<T[]> source)
+        {
+            T[,] twoDimensional;
+            T[][] arrayOfArray;
+            int numberofColumns;
+
+            arrayOfArray = source.ToArray();
+            numberofColumns = (arrayOfArray.Length > 0) ? arrayOfArray[0].Length : 0;
+            twoDimensional = new T[arrayOfArray.Length, numberofColumns];
+
+            for (int row = 0; row < arrayOfArray.GetLength(0); ++row)
+                for (int col = 0; col < numberofColumns; ++col)
+                    twoDimensional[row, col] = arrayOfArray[row][col];
+
+            return twoDimensional;
+        }
+    }
+
+
+    /**
+    * 
+    * 
+    * 
+    *    Topic, Message Objects, for ORM
+    * 
+    * 
+    * 
+    * 
+    */
+
+    class KafkaMessage
+    {
+        public int Id { get; set; }
+        public string Value { get; set; }
+        public DateTime Created { get; set; }
+    }
+
+    class KafkaTopic
+    {
+        public int Id { get; set; }
+        public string Value { get; set; }
     }
 
 }
