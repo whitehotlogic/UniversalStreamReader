@@ -5,12 +5,11 @@ using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading.Tasks;
 using System.Linq;
-
-// for the kafka consumer (using confluent c# wrapper for librdkafka C client)
 using System.Text;
+using System.Data.SQLite;
 using Confluent.Kafka.Serialization;
 using Confluent.Kafka;
-using System.Data.SQLite;
+
 
 namespace UniversalStreamReader
 {
@@ -19,20 +18,26 @@ namespace UniversalStreamReader
         public const string DATABASE_FILE = @"c:\tempDev\FullData.sqlite";
         public const string STREAM_SERVERS = "192.168.1.118:9092";
 
+        public const string PERSISTENCE_FILE = @"c:\tempDev\CacheData.txt";
+        public const int RINGBUFFER_SIZE = 5;
+
         static void Main(string[] args)
         {
 
-            
-            
             List<string> topicsToConsume = new List<string>();
             topicsToConsume.Add("testaroo");
             //topicsToConsume.Add("dummytopic1");
             //topicsToConsume.Add("dummytopic5");
             //topicsToConsume.Add("dummytopic6");
 
+            IPersist[] ip = new IPersist[] {
+                new FilePersist(PERSISTENCE_FILE)
+                //,new SQLitePersist(DATABASE_FILE)
+            };
+            InMemoryCache imc = new InMemoryCache(RINGBUFFER_SIZE);
+            IStreamConsumer sck = new StreamConsumer_Kafka(imc, ip);
+
             //create background thread to consume kafka cluster
-            InMemoryCacheWithFilePersist imcwfp = new InMemoryCacheWithFilePersist();
-            IStreamConsumer sck = new StreamConsumer_Kafka(imcwfp);
             Task.Factory.StartNew(() => sck.Run_Poll(STREAM_SERVERS, topicsToConsume));
            
             while (true)
@@ -45,37 +50,33 @@ namespace UniversalStreamReader
         }
     }
 
-
-
-
-
-
     /**
      * 
      * 
      * 
      * 
-     *    Kafka Consumer
-     * 
-     * 
-     * 
-     * 
+     *   Stream Reader Interface and Implementations
+     *   
+     *   
+     *   
+     *   
      */
 
 
     interface IStreamConsumer
     {
-        void Run_Poll(string brokerList, List<string> topics);
+        void Run_Poll(string server, List<string> topicList);
     }
 
     class StreamConsumer_Kafka : IStreamConsumer {
 
-        private InMemoryCacheWithFilePersist imcwfp;
+        private InMemoryCache imc;
+        private IPersist[] ip;
 
-        public StreamConsumer_Kafka(InMemoryCacheWithFilePersist imcwfp)
+        public StreamConsumer_Kafka(InMemoryCache imc, IPersist[] ip)
         {
-            this.imcwfp = imcwfp;
-
+            this.imc = imc;
+            this.ip = ip;
         }
 
         private static Dictionary<string, object> constructConfig(string brokerList, bool enableAutoCommit) =>
@@ -97,26 +98,24 @@ namespace UniversalStreamReader
         public void Run_Poll(string brokerList, List<string> topics)
         {
 
-            //initialize in-memory cache
-            //InMemoryCacheWithFilePersist imcwfp = new InMemoryCacheWithFilePersist();
-            
-
-            //using (var consumer = new Consumer<Null, string>(constructConfig(brokerList, true), IDeserializer<string>, new StringDeserializer(Encoding.UTF8)))
             using (var consumer = new Consumer<string, string>(constructConfig(brokerList, true), new StringDeserializer(Encoding.UTF8), new StringDeserializer(Encoding.UTF8)))
             {
-                // Note: All event handlers are called on the main thread.
-
-                // NEW MESSAGE FOUND FOR TOPIC!
-                consumer.OnMessage += (_, msg) =>
+                
+                consumer.OnMessage += (_, msg) => // NEW MESSAGE FOUND FOR TOPIC!
                 {
 
-                    
                     Console.WriteLine($"NEW_MESSAGE: Topic: {msg.Topic} Partition: {msg.Partition} Offset: {msg.Offset} {msg.Value}");
 
+                    string created = DateTime.Now.Ticks.ToString();
 
                     //write to in-memory cache
-                    imcwfp.addMessage(msg.Topic, msg.Value, DateTime.Now.Ticks.ToString());
+                    imc.addMessage(msg.Topic, msg.Value, created);
 
+                    foreach (IPersist persistentStorageImplementation in ip)
+                    {
+                        persistentStorageImplementation.Persist(msg.Topic, msg.Value, created);
+                    }
+                    
                 };
 
                 consumer.OnPartitionEOF += (_, end)
@@ -177,12 +176,13 @@ namespace UniversalStreamReader
         }
     }
 
+
     /**
      * 
      * 
      * 
      * 
-     *   Trivial In-Memory Cache Implementation
+     *   Persistence Interface and Implementations
      *   
      *   
      *   
@@ -190,31 +190,19 @@ namespace UniversalStreamReader
      */
 
 
-
-    class InMemoryCacheWithFilePersist
+    interface IPersist
     {
+        void Persist(string topic, string message, string created);
 
-        public const string PERSISTENCE_FILE = @"c:\tempDev\CacheData.txt";
-        public const int RINGBUFFER_SIZE = 5;
+    }
 
-        string[,] stringArrayCache = null;
+    class FilePersist : IPersist
+    {
+        string persistenceFilePath;
 
-        private String persistenceFilePath = null;
-
-        private bool cacheIsFull = false;
-        private int indexToWrite = 0;
-        private int ringBufferSize;
-
-        public InMemoryCacheWithFilePersist()
+        public FilePersist(string persistenceFilePath)
         {
-
-            this.ringBufferSize = RINGBUFFER_SIZE;
-            stringArrayCache = new string[ringBufferSize, 3]; // number of rows in array predefined by ringBufferSize
-                                                              // three strings are created, topic, message
-            
-
-            this.persistenceFilePath = PERSISTENCE_FILE; // we need the value for other methods
-
+            this.persistenceFilePath = persistenceFilePath;
 
             try // check and see if cache persistence file exists, and if not, create it
             {
@@ -222,93 +210,36 @@ namespace UniversalStreamReader
                 {
                     File.Create(persistenceFilePath).Dispose(); // create the cache persist file on disk
                 }
-            } catch (IOException e)
+            }
+            catch (IOException e)
             {
                 Console.WriteLine("ERROR: Could not create cache persistence file -- " + e.Message);
             }
-
-            try // try to load the persistent cache file into memory
-            {
-                using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Open))
-                {
-                    IFormatter bf = new BinaryFormatter();
-                    this.stringArrayCache = (string[,]) bf.Deserialize(fileStream);  //assumes cache size in file matches cache 
-                                                                                     //  size specified in RINGBUFFER_SIZE
-
-                    fileStream.Close();
-                }
-
-                using (var fs = new FileStream(persistenceFilePath, FileMode.Truncate)) { } // wipe the disk file
-
-
-                // sort by DateTime.UtcNow, so the oldest cache entry is at the beginning, and GO
-                this.stringArrayCache = stringArrayCache.OrderBy(row => row[0]); // row[0] is the datetime.now.ticks time it was added
-
-                // rewrite the sorted array to file, so it matches the cache
-                using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
-                {
-                    IFormatter bf = new BinaryFormatter();
-                    bf.Serialize(fileStream, this.stringArrayCache);
-                    fileStream.Close();
-                }
-
-
-            }
-            catch (FileNotFoundException e)
-            {
-                Console.WriteLine("WARNING: Persistence File Not Found  -- " + e.Message);
-            }
-            catch (SerializationException e)
-            {
-                // if empty, just display warning
-                // if corrupt, display ERROR and quit program waiting 10secs for user to view error
-                Console.WriteLine("WARNING: Persistence file is empty or unexpected format  -- " + e.Message);
-            }
-            
-
-            Console.WriteLine("INFO: In-Memory Cache Initialized with " + ringBufferSize + " records");
-
         }
 
-        public void addMessage(string topic, string message, string created)
-        {
-
-            
-
-            if (indexToWrite > ringBufferSize - 1) // if we've reached the end of the ringbuffer / cache
-                indexToWrite = 0;
-
-            this.stringArrayCache[indexToWrite, 0] = created; // gives me a sortable  column
-            this.stringArrayCache[indexToWrite, 1] = topic;
-            this.stringArrayCache[indexToWrite, 2] = message;
-
-            indexToWrite++; // set pointer to next index in the cache for next message write (seems ringbuffery to me)
-
-            Console.WriteLine("INFO: topic: \"" + topic + "\", with message: \"" + message + "\" has been added to cache at \"" + created + "\"");
-
-            //write to persisted cache disk file
-            serializedFilePersist();
-            Console.WriteLine("INFO: Cache persisted to disk file");
-
-            //write to DB
-            //sqliteDatabasePersist(topic, message, created);
-            Console.WriteLine("INFO: Message added to sqlite database");
-
-        }
-
-
-        public void serializedFilePersist()
+        public void Persist(string topic, string message, string created)
         {
             using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
             {
                 IFormatter bf = new BinaryFormatter();
-                bf.Serialize(fileStream, this.stringArrayCache);
+                bf.Serialize(fileStream, topic + "," + message + "," + created + "\n");
                 fileStream.Close();
             }
+
+
+        }
+    }
+
+    class SQLitePersist : IPersist
+    {
+        string dbFilePath;
+
+        public SQLitePersist(string dbFilePath)
+        {
+            this.dbFilePath = dbFilePath;
         }
 
-
-        public void sqliteDatabasePersist(string topic, string message, string created)
+        public void Persist(string topic, string message, string created)
         {
 
             // would be nice: use ORM wrapper like Dapper for query sanitization + better readability
@@ -324,9 +255,9 @@ namespace UniversalStreamReader
             // create message table if it doesn't already exist
 
             // for each topic in cache, query db topic table to see if topic already exists, if not insert it
-                // for each message in the cache topic
-                    // if latest message in cache is not the latest message in db max(created), then just insert this new one
-                    // else, check each message for existence in the db and insert if it doesn't
+            // for each message in the cache topic
+            // if latest message in cache is not the latest message in db max(created), then just insert this new one
+            // else, check each message for existence in the db and insert if it doesn't
 
 
             // create db if it doesn't already exists
@@ -359,7 +290,7 @@ namespace UniversalStreamReader
             }
 
             try // create message table if it doesn't already exist
-            {  
+            {
                 tsql = "create table if not exists Messages (" +
                     "idMessage INTEGER PRIMARY KEY ASC, " +
                     "message VARCHAR not null, " +
@@ -404,6 +335,102 @@ namespace UniversalStreamReader
         }
 
     }
+
+    /**
+     * 
+     * 
+     * 
+     * 
+     *   In-Memory Cache Implementation
+     *   
+     *   
+     *   
+     *   
+     */
+
+    class InMemoryCache
+    {
+
+        string[,] stringArrayCache = null;
+
+        private String persistenceFilePath = null;
+
+        private int indexToWrite = 0;
+        private int ringBufferSize;
+
+        public InMemoryCache(int ringBufferSize)
+        {
+
+            this.ringBufferSize = ringBufferSize;
+            stringArrayCache = new string[ringBufferSize, 3]; // number of rows in array predefined by ringBufferSize
+                                                              // three strings are created, topic, message
+           
+        }
+
+        public void addMessage(string topic, string message, string created)
+        {
+
+            if (indexToWrite > ringBufferSize - 1) // if we've reached the end of the ringbuffer / cache
+                indexToWrite = 0;
+
+            this.stringArrayCache[indexToWrite, 0] = created; // gives me a sortable  column
+            this.stringArrayCache[indexToWrite, 1] = topic;
+            this.stringArrayCache[indexToWrite, 2] = message;
+
+            indexToWrite++; // set pointer to next index in the cache for next message write (seems ringbuffery to me)
+
+            Console.WriteLine("INFO: topic: \"" + topic + "\", with message: \"" + message + "\" has been added to cache at \"" + created + "\"");
+
+
+        }
+
+    }
+
+
+
+    // i just realize the spec doesn't actually include loading the cache on startup
+    /* 
+    try // try to load the persistent cache file into memory
+    {
+        using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Open))
+        {
+            IFormatter bf = new BinaryFormatter();
+            this.stringArrayCache = (string[,]) bf.Deserialize(fileStream);  //assumes cache size in file matches cache 
+                                                                             //  size specified in RINGBUFFER_SIZE
+
+            fileStream.Close();
+        }
+
+        using (var fs = new FileStream(persistenceFilePath, FileMode.Truncate)) { } // wipe the disk file
+
+
+        // sort by DateTime.UtcNow, so the oldest cache entry is at the beginning, and GO
+        this.stringArrayCache = stringArrayCache.OrderBy(row => row[0]); // row[0] is the datetime.now.ticks time it was added
+
+        // rewrite the sorted array to file, so it matches the cache
+        using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
+        {
+            IFormatter bf = new BinaryFormatter();
+            bf.Serialize(fileStream, this.stringArrayCache);
+            fileStream.Close();
+        }
+
+
+    }
+    catch (FileNotFoundException e)
+    {
+        Console.WriteLine("WARNING: Persistence File Not Found  -- " + e.Message);
+    }
+    catch (SerializationException e)
+    {
+        // if empty, just display warning
+        // if corrupt, display ERROR and quit program waiting 10secs for user to view error
+        Console.WriteLine("WARNING: Persistence file is empty or unexpected format  -- " + e.Message);
+    }
+
+
+    Console.WriteLine("INFO: In-Memory Cache Initialized with " + ringBufferSize + " records");
+    */
 
 
     //
