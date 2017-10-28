@@ -48,11 +48,24 @@
     <Reference Include="System.Core" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="UnitTest1.cs" />
+    <Compile Include="FilePersistTests.cs" />
+    <Compile Include="InMemoryCacheTests.cs" />
+    <Compile Include="SQLitePersistTests.cs" />
+    <Compile Include="StreamConsumer_KafkaTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\KafkaProducer\KafkaProducer.csproj">
+      <Project>{3c6df4ea-a366-4b2a-b951-9da99d06d9df}</Project>
+      <Name>KafkaProducer</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\UniversalStreamReader\UniversalStreamReader.csproj">
+      <Project>{efd49307-e3c5-4eeb-9c7e-20b956b10388}</Project>
+      <Name>UniversalStreamReader</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets" Condition="Exists('$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets')" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

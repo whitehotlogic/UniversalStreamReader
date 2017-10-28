@@ -17,7 +17,7 @@ namespace KafkaProducer
         public static void Main(string[] args)
         {
             const string BOOTSTRAP_SERVERS = "192.168.1.118:9092";  // args[0];
-            const string topicName = "testaroo"; // args[1];
+            const string topicName = "maintopic"; // args[1];
 
             var config = new Dictionary<string, object> { { "bootstrap.servers", BOOTSTRAP_SERVERS } };
 

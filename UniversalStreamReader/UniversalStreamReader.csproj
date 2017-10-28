@@ -55,8 +55,15 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="FilePersist.cs" />
+    <Compile Include="ICache.cs" />
+    <Compile Include="InMemoryCache.cs" />
+    <Compile Include="IStreamConsumer.cs" />
+    <Compile Include="SQLitePersist.cs" />
+    <Compile Include="IPersist.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="StreamConsumer_Kafka.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
