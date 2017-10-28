@@ -21,3 +21,6 @@ C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\msvcr120.dl
 C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\x64\zlib.dll
 C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\Confluent.Kafka.dll
 C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\Confluent.Kafka.xml
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\System.Data.SQLite.dll
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\System.Data.SQLite.xml
+C:\tempDev\UniversalStreamReader\UniversalStreamReader\bin\Debug\System.Data.SQLite.dll.config

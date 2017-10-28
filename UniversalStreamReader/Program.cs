@@ -10,21 +10,20 @@ using System.Linq;
 using System.Text;
 using Confluent.Kafka.Serialization;
 using Confluent.Kafka;
+using System.Data.SQLite;
 
 namespace UniversalStreamReader
 {
     class Program
     {
-
-        // todo: is the cache appending to itself? because it shouldn't
-        // cache should read from disk, then wipe the file?
-
+        public const string DATABASE_FILE = @"c:\tempDev\FullData.sqlite";
+        public const string STREAM_SERVERS = "192.168.1.118:9092";
 
         static void Main(string[] args)
         {
 
-            const string DATABASE_FILE = @"c:\tempDev\AllData.sqlite";
-            const string STREAM_SERVERS = "192.168.1.118:9092";
+            
+            
             List<string> topicsToConsume = new List<string>();
             topicsToConsume.Add("testaroo");
             //topicsToConsume.Add("dummytopic1");
@@ -32,7 +31,9 @@ namespace UniversalStreamReader
             //topicsToConsume.Add("dummytopic6");
 
             //create background thread to consume kafka cluster
-            Task.Factory.StartNew(() => StreamConsumer_Kafka.Run_Poll(STREAM_SERVERS, topicsToConsume));
+            InMemoryCacheWithFilePersist imcwfp = new InMemoryCacheWithFilePersist();
+            IStreamConsumer sck = new StreamConsumer_Kafka(imcwfp);
+            Task.Factory.StartNew(() => sck.Run_Poll(STREAM_SERVERS, topicsToConsume));
            
             while (true)
             {
@@ -47,7 +48,7 @@ namespace UniversalStreamReader
 
 
 
- 
+
 
     /**
      * 
@@ -61,10 +62,21 @@ namespace UniversalStreamReader
      * 
      */
 
-    class StreamConsumer_Kafka {
 
-        const string PERSISTENCE_FILE = @"c:\tempDev\CacheData.txt";
-        const int RINGBUFFER_SIZE = 5;
+    interface IStreamConsumer
+    {
+        void Run_Poll(string brokerList, List<string> topics);
+    }
+
+    class StreamConsumer_Kafka : IStreamConsumer {
+
+        private InMemoryCacheWithFilePersist imcwfp;
+
+        public StreamConsumer_Kafka(InMemoryCacheWithFilePersist imcwfp)
+        {
+            this.imcwfp = imcwfp;
+
+        }
 
         private static Dictionary<string, object> constructConfig(string brokerList, bool enableAutoCommit) =>
                                                                                 new Dictionary<string, object>
@@ -82,11 +94,12 @@ namespace UniversalStreamReader
         };
 
 
-        public static void Run_Poll(string brokerList, List<string> topics)
+        public void Run_Poll(string brokerList, List<string> topics)
         {
 
             //initialize in-memory cache
-            InMemoryCacheWithFilePersist imcwfp = new InMemoryCacheWithFilePersist(RINGBUFFER_SIZE, PERSISTENCE_FILE);
+            //InMemoryCacheWithFilePersist imcwfp = new InMemoryCacheWithFilePersist();
+            
 
             //using (var consumer = new Consumer<Null, string>(constructConfig(brokerList, true), IDeserializer<string>, new StringDeserializer(Encoding.UTF8)))
             using (var consumer = new Consumer<string, string>(constructConfig(brokerList, true), new StringDeserializer(Encoding.UTF8), new StringDeserializer(Encoding.UTF8)))
@@ -102,7 +115,7 @@ namespace UniversalStreamReader
 
 
                     //write to in-memory cache
-                    imcwfp.addMessage(msg.Topic, msg.Value, DateTime.UtcNow);
+                    imcwfp.addMessage(msg.Topic, msg.Value, DateTime.Now.Ticks.ToString());
 
                 };
 
@@ -177,8 +190,12 @@ namespace UniversalStreamReader
      */
 
 
+
     class InMemoryCacheWithFilePersist
     {
+
+        public const string PERSISTENCE_FILE = @"c:\tempDev\CacheData.txt";
+        public const int RINGBUFFER_SIZE = 5;
 
         string[,] stringArrayCache = null;
 
@@ -188,15 +205,15 @@ namespace UniversalStreamReader
         private int indexToWrite = 0;
         private int ringBufferSize;
 
-        public InMemoryCacheWithFilePersist(int ringBufferSize, string persistenceFilePath)
+        public InMemoryCacheWithFilePersist()
         {
 
-            this.ringBufferSize = ringBufferSize;
+            this.ringBufferSize = RINGBUFFER_SIZE;
             stringArrayCache = new string[ringBufferSize, 3]; // number of rows in array predefined by ringBufferSize
                                                               // three strings are created, topic, message
             
 
-            this.persistenceFilePath = persistenceFilePath; // we need the value for other methods
+            this.persistenceFilePath = PERSISTENCE_FILE; // we need the value for other methods
 
 
             try // check and see if cache persistence file exists, and if not, create it
@@ -225,7 +242,7 @@ namespace UniversalStreamReader
 
 
                 // sort by DateTime.UtcNow, so the oldest cache entry is at the beginning, and GO
-                this.stringArrayCache = stringArrayCache.OrderBy(row => row[0]); // row[0] is the datetime.now.ticks when it was added
+                this.stringArrayCache = stringArrayCache.OrderBy(row => row[0]); // row[0] is the datetime.now.ticks time it was added
 
                 // rewrite the sorted array to file, so it matches the cache
                 using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
@@ -253,26 +270,28 @@ namespace UniversalStreamReader
 
         }
 
-        public void addMessage(string topic, string message, DateTime created)
+        public void addMessage(string topic, string message, string created)
         {
+
+            
 
             if (indexToWrite > ringBufferSize - 1) // if we've reached the end of the ringbuffer / cache
                 indexToWrite = 0;
 
-            this.stringArrayCache[indexToWrite, 0] = created.Ticks.ToString(); // gives me a sortable  column
+            this.stringArrayCache[indexToWrite, 0] = created; // gives me a sortable  column
             this.stringArrayCache[indexToWrite, 1] = topic;
             this.stringArrayCache[indexToWrite, 2] = message;
 
             indexToWrite++; // set pointer to next index in the cache for next message write (seems ringbuffery to me)
 
-            Console.WriteLine("INFO: topic: \"" + topic + "\", with message: \"" + message + "\" has been added to cache at \"" + created.Ticks.ToString() + "\"");
+            Console.WriteLine("INFO: topic: \"" + topic + "\", with message: \"" + message + "\" has been added to cache at \"" + created + "\"");
 
             //write to persisted cache disk file
             serializedFilePersist();
             Console.WriteLine("INFO: Cache persisted to disk file");
 
             //write to DB
-            sqliteDatabasePersist();
+            //sqliteDatabasePersist(topic, message, created);
             Console.WriteLine("INFO: Message added to sqlite database");
 
         }
@@ -289,7 +308,7 @@ namespace UniversalStreamReader
         }
 
 
-        public void sqliteDatabasePersist()
+        public void sqliteDatabasePersist(string topic, string message, string created)
         {
 
             // would be nice: use ORM wrapper like Dapper for query sanitization + better readability
@@ -304,13 +323,86 @@ namespace UniversalStreamReader
             // create topic table if it doesn't already exist
             // create message table if it doesn't already exist
 
-            // for each topic in cache, query db topic table to see if it already exists, if not insert it
+            // for each topic in cache, query db topic table to see if topic already exists, if not insert it
                 // for each message in the cache topic
-                    // if latest message in cache is not the latest message in db, then just insert this new one
+                    // if latest message in cache is not the latest message in db max(created), then just insert this new one
                     // else, check each message for existence in the db and insert if it doesn't
 
+
+            // create db if it doesn't already exists
+            if (!File.Exists(Program.DATABASE_FILE))
+                SQLiteConnection.CreateFile(Program.DATABASE_FILE);
+
+            // connect to db and create necessary objects
+            SQLiteConnection dbConnection = new SQLiteConnection("Data Source=MyDatabase.sqlite;Version=3;");
+            dbConnection.Open();
+            string tsql = null;
+            SQLiteCommand dbCommand = null;
+
+
+            try  // create topic table if it doesn't already exist
+            {
+                /*
+                tsql = "create table if not exists Topics (" +
+                    "idTopic INTEGER PRIMARY KEY ASC, " +
+                    "topic VARCHAR not null UNIQUE)";
+                */
+                tsql = "create table if not exists Topics (" +
+                    "idTopic INTEGER, " +
+                    "topic VARCHAR(10))";
+                dbCommand = new SQLiteCommand(tsql, dbConnection);
+                dbCommand.ExecuteNonQuery();
+            }
+            catch (SQLiteException e)
+            {
+                Console.WriteLine("ERROR: Problem creating table \"Topics\" -- " + e.Message);
+            }
+
+            try // create message table if it doesn't already exist
+            {  
+                tsql = "create table if not exists Messages (" +
+                    "idMessage INTEGER PRIMARY KEY ASC, " +
+                    "message VARCHAR not null, " +
+                    "created INTEGER not null UNIQUE, " +
+                    "idTopic INTEGER not null," +
+                    "FOREIGN KEY(idTopic) REFERENCES Topics(idTopic) )";
+                dbCommand = new SQLiteCommand(tsql, dbConnection);
+                dbCommand.ExecuteNonQuery();
+            }
+            catch (SQLiteException e)
+            {
+                Console.WriteLine("ERROR: Problem creating table \"Messages\" -- " + e.Message);
+            }
+
+            try
+            {
+                // insert topic in Topics table if the row doesn't exist already
+                tsql = "insert into Topics (topic) values ('" + topic + "') ";
+                dbCommand = new SQLiteCommand(tsql, dbConnection);
+                dbCommand.ExecuteNonQuery();
+            }
+            catch (SQLiteException e)
+            {
+                Console.WriteLine("ERROR: Problem creating new topic -- " + e.Message);
+            }
+
+            // get idTopic from topic table, to be used as foreign key for message insert
+            tsql = "select idTopic from Topics where " +
+                "topic = '" + topic + "'";
+            dbCommand = new SQLiteCommand(tsql, dbConnection);
+            SQLiteDataReader dbReader = dbCommand.ExecuteReader();
+            dbReader.Read();
+            string idTopic = dbReader["value"].ToString();
+
+            // insert message in the Messages table if the row doesn't exist already
+            tsql = "insert or IGNORE into Messages (message,created,idTopic) " +
+                "values (" + message + "," + created + "," + idTopic + ")";
+            dbCommand = new SQLiteCommand(tsql, dbConnection);
+            dbCommand.ExecuteNonQuery();
+
+
         }
-        
+
     }
 
 
