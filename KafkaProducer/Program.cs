@@ -9,6 +9,11 @@ namespace KafkaProducer
 {
     class Program
     {
+
+        // producer always posts to topicName in UI even when other topic specified
+        // 
+
+
         public static void Main(string[] args)
         {
             const string BOOTSTRAP_SERVERS = "192.168.1.118:9092";  // args[0];

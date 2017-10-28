@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
-using System.Threading.Tasks;
-using System.Linq;
 using System.Text;
 using System.Data.SQLite;
 using Confluent.Kafka.Serialization;
@@ -15,10 +13,10 @@ namespace UniversalStreamReader
 {
     class Program
     {
-        public const string DATABASE_FILE = @"c:\tempDev\FullData.sqlite";
+        public const string DATABASE_FILE = @"c:\tempDev\DBPersist.sqlite";
         public const string STREAM_SERVERS = "192.168.1.118:9092";
 
-        public const string PERSISTENCE_FILE = @"c:\tempDev\CacheData.txt";
+        public const string PERSISTENCE_FILE = @"c:\tempDev\FilePersist.csv";
         public const int RINGBUFFER_SIZE = 5;
 
         static void Main(string[] args)
@@ -26,27 +24,17 @@ namespace UniversalStreamReader
 
             List<string> topicsToConsume = new List<string>();
             topicsToConsume.Add("testaroo");
-            //topicsToConsume.Add("dummytopic1");
-            //topicsToConsume.Add("dummytopic5");
-            //topicsToConsume.Add("dummytopic6");
 
             IPersist[] ip = new IPersist[] {
-                new FilePersist(PERSISTENCE_FILE)
-                //,new SQLitePersist(DATABASE_FILE)
+                new FilePersist(PERSISTENCE_FILE),
+                new SQLitePersist(DATABASE_FILE)
             };
             InMemoryCache imc = new InMemoryCache(RINGBUFFER_SIZE);
             IStreamConsumer sck = new StreamConsumer_Kafka(imc, ip);
 
-            //create background thread to consume kafka cluster
-            Task.Factory.StartNew(() => sck.Run_Poll(STREAM_SERVERS, topicsToConsume));
+            //main loop to consume kafka cluster
+            sck.Run_Poll(STREAM_SERVERS, topicsToConsume);
            
-            while (true)
-            {
-                // keep the main thread open for testing
-                Task.Delay(TimeSpan.FromMilliseconds(1000)).Wait();
-            }
-
-
         }
     }
 
@@ -62,7 +50,6 @@ namespace UniversalStreamReader
      *   
      */
 
-
     interface IStreamConsumer
     {
         void Run_Poll(string server, List<string> topicList);
@@ -73,25 +60,27 @@ namespace UniversalStreamReader
         private InMemoryCache imc;
         private IPersist[] ip;
 
+
         public StreamConsumer_Kafka(InMemoryCache imc, IPersist[] ip)
         {
             this.imc = imc;
             this.ip = ip;
         }
 
+
         private static Dictionary<string, object> constructConfig(string brokerList, bool enableAutoCommit) =>
                                                                                 new Dictionary<string, object>
         {
-                    { "group.id", "sd34243asd" }, // change the group.id to get all messages for the topic from beginning of time
-                    { "enable.auto.commit", enableAutoCommit },
-                    { "auto.commit.interval.ms", 5000 },
-                    { "statistics.interval.ms", 60000 }, // why am i doing this?
-                    { "bootstrap.servers", brokerList },
-                    { "default.topic.config", new Dictionary<string, object>()
-                        {
-                            { "auto.offset.reset", "smallest" }
-                        }
-                    }
+            { "group.id", "sd34243asd" }, // change the group.id to get all messages for the topic from beginning of time
+            { "enable.auto.commit", enableAutoCommit },
+            { "auto.commit.interval.ms", 5000 },
+            { "statistics.interval.ms", 60000 }, // why am i doing this?
+            { "bootstrap.servers", brokerList },
+            { "default.topic.config", new Dictionary<string, object>()
+                {
+                    { "auto.offset.reset", "smallest" }
+                }
+            }
         };
 
 
@@ -106,12 +95,11 @@ namespace UniversalStreamReader
 
                     Console.WriteLine($"NEW_MESSAGE: Topic: {msg.Topic} Partition: {msg.Partition} Offset: {msg.Offset} {msg.Value}");
 
-                    string created = DateTime.Now.Ticks.ToString();
+                    string created = DateTime.Now.Ticks.ToString(); // just some numeric value based on time, jic i need to sort at any point
 
-                    //write to in-memory cache
-                    imc.addMessage(msg.Topic, msg.Value, created);
+                    imc.addMessage(msg.Topic, msg.Value, created); //write to in-memory cache
 
-                    foreach (IPersist persistentStorageImplementation in ip)
+                    foreach (IPersist persistentStorageImplementation in ip) //perform each storage implementation for this message
                     {
                         persistentStorageImplementation.Persist(msg.Topic, msg.Value, created);
                     }
@@ -219,14 +207,21 @@ namespace UniversalStreamReader
 
         public void Persist(string topic, string message, string created)
         {
+            /*
             using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
             {
                 IFormatter bf = new BinaryFormatter();
-                bf.Serialize(fileStream, topic + "," + message + "," + created + "\n");
+                bf.Serialize(fileStream, );
                 fileStream.Close();
             }
+            */
 
+            using (System.IO.StreamWriter persistFile = new System.IO.StreamWriter(persistenceFilePath, true))
+            {
+                persistFile.WriteLine(topic + "," + message + "," + created + "\n");
+            }
 
+            Console.WriteLine("INFO: Message persisted to file: " + persistenceFilePath);
         }
     }
 
@@ -242,45 +237,22 @@ namespace UniversalStreamReader
         public void Persist(string topic, string message, string created)
         {
 
-            // would be nice: use ORM wrapper like Dapper for query sanitization + better readability
-
-            // pseudocoded for the assumptions:
-            //   1) that the database should update one message at a time, to stay in sync with the cache
-            //   2) that the database may hold older records than the cache holds
-            //   otherwise, if db only needs persisted on close, then just rewrite the entire db on close
-            //     for simplicity and readability? that sounds horrible. lol.
-
             // create db if it doesn't already exists
-            // create topic table if it doesn't already exist
-            // create message table if it doesn't already exist
-
-            // for each topic in cache, query db topic table to see if topic already exists, if not insert it
-            // for each message in the cache topic
-            // if latest message in cache is not the latest message in db max(created), then just insert this new one
-            // else, check each message for existence in the db and insert if it doesn't
-
-
-            // create db if it doesn't already exists
-            if (!File.Exists(Program.DATABASE_FILE))
-                SQLiteConnection.CreateFile(Program.DATABASE_FILE);
+            if (!File.Exists(dbFilePath))
+                SQLiteConnection.CreateFile(dbFilePath);
+            // IS THE ABOVE EVEN NECESSARY? DOESN'T SQLITCONNECTION DO THIS AUTOMAGICALLY?
 
             // connect to db and create necessary objects
-            SQLiteConnection dbConnection = new SQLiteConnection("Data Source=MyDatabase.sqlite;Version=3;");
+            SQLiteConnection dbConnection = new SQLiteConnection("Data Source=" + dbFilePath + ";Version=3;");
             dbConnection.Open();
             string tsql = null;
             SQLiteCommand dbCommand = null;
 
-
             try  // create topic table if it doesn't already exist
             {
-                /*
                 tsql = "create table if not exists Topics (" +
                     "idTopic INTEGER PRIMARY KEY ASC, " +
                     "topic VARCHAR not null UNIQUE)";
-                */
-                tsql = "create table if not exists Topics (" +
-                    "idTopic INTEGER, " +
-                    "topic VARCHAR(10))";
                 dbCommand = new SQLiteCommand(tsql, dbConnection);
                 dbCommand.ExecuteNonQuery();
             }
@@ -305,10 +277,9 @@ namespace UniversalStreamReader
                 Console.WriteLine("ERROR: Problem creating table \"Messages\" -- " + e.Message);
             }
 
-            try
+            try // insert topic in Topics table if the row doesn't exist already
             {
-                // insert topic in Topics table if the row doesn't exist already
-                tsql = "insert into Topics (topic) values ('" + topic + "') ";
+                tsql = "insert or IGNORE into Topics (topic) values ('" + topic + "') ";
                 dbCommand = new SQLiteCommand(tsql, dbConnection);
                 dbCommand.ExecuteNonQuery();
             }
@@ -317,20 +288,28 @@ namespace UniversalStreamReader
                 Console.WriteLine("ERROR: Problem creating new topic -- " + e.Message);
             }
 
-            // get idTopic from topic table, to be used as foreign key for message insert
-            tsql = "select idTopic from Topics where " +
-                "topic = '" + topic + "'";
-            dbCommand = new SQLiteCommand(tsql, dbConnection);
-            SQLiteDataReader dbReader = dbCommand.ExecuteReader();
-            dbReader.Read();
-            string idTopic = dbReader["value"].ToString();
+            try 
+            {
+                // get idTopic from topic table, to be used as foreign key for message insert
+                tsql = "select idTopic from Topics where " +
+                    "topic = '" + topic + "'";
+                dbCommand = new SQLiteCommand(tsql, dbConnection);
+                SQLiteDataReader dbReader = dbCommand.ExecuteReader();
+                dbReader.Read();
+                string idTopic = dbReader.GetInt32(0).ToString();
 
-            // insert message in the Messages table if the row doesn't exist already
-            tsql = "insert or IGNORE into Messages (message,created,idTopic) " +
-                "values (" + message + "," + created + "," + idTopic + ")";
-            dbCommand = new SQLiteCommand(tsql, dbConnection);
-            dbCommand.ExecuteNonQuery();
+                // insert message in the Messages table if the row doesn't exist already
+                tsql = "insert or IGNORE into Messages (message,created,idTopic) " +
+                    "values ('" + message + "'," + created + "," + idTopic + ")";
+                dbCommand = new SQLiteCommand(tsql, dbConnection);
+                dbCommand.ExecuteNonQuery();
+            }
+            catch (SQLiteException e)
+            {
+                Console.WriteLine("ERROR: Problem inserting message -- " + e.Message);
+            }
 
+            Console.WriteLine("INFO: Message persisted to SQLite database: " + dbFilePath);
 
         }
 
@@ -351,10 +330,7 @@ namespace UniversalStreamReader
     class InMemoryCache
     {
 
-        string[,] stringArrayCache = null;
-
-        private String persistenceFilePath = null;
-
+        private string[,] stringArrayCache = null;
         private int indexToWrite = 0;
         private int ringBufferSize;
 
@@ -364,7 +340,6 @@ namespace UniversalStreamReader
             this.ringBufferSize = ringBufferSize;
             stringArrayCache = new string[ringBufferSize, 3]; // number of rows in array predefined by ringBufferSize
                                                               // three strings are created, topic, message
-           
         }
 
         public void addMessage(string topic, string message, string created)
@@ -381,130 +356,8 @@ namespace UniversalStreamReader
 
             Console.WriteLine("INFO: topic: \"" + topic + "\", with message: \"" + message + "\" has been added to cache at \"" + created + "\"");
 
-
         }
 
-    }
-
-
-
-    // i just realize the spec doesn't actually include loading the cache on startup
-    /* 
-    try // try to load the persistent cache file into memory
-    {
-        using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Open))
-        {
-            IFormatter bf = new BinaryFormatter();
-            this.stringArrayCache = (string[,]) bf.Deserialize(fileStream);  //assumes cache size in file matches cache 
-                                                                             //  size specified in RINGBUFFER_SIZE
-
-            fileStream.Close();
-        }
-
-        using (var fs = new FileStream(persistenceFilePath, FileMode.Truncate)) { } // wipe the disk file
-
-
-        // sort by DateTime.UtcNow, so the oldest cache entry is at the beginning, and GO
-        this.stringArrayCache = stringArrayCache.OrderBy(row => row[0]); // row[0] is the datetime.now.ticks time it was added
-
-        // rewrite the sorted array to file, so it matches the cache
-        using (FileStream fileStream = new FileStream(persistenceFilePath, FileMode.Create))
-        {
-            IFormatter bf = new BinaryFormatter();
-            bf.Serialize(fileStream, this.stringArrayCache);
-            fileStream.Close();
-        }
-
-
-    }
-    catch (FileNotFoundException e)
-    {
-        Console.WriteLine("WARNING: Persistence File Not Found  -- " + e.Message);
-    }
-    catch (SerializationException e)
-    {
-        // if empty, just display warning
-        // if corrupt, display ERROR and quit program waiting 10secs for user to view error
-        Console.WriteLine("WARNING: Persistence file is empty or unexpected format  -- " + e.Message);
-    }
-
-
-    Console.WriteLine("INFO: In-Memory Cache Initialized with " + ringBufferSize + " records");
-    */
-
-
-    //
-    // below is just a class i found for sorting multidimensional arrays by column, which i need for when i restore
-    //    the persisted disk cache back into memory
-    // 
-
-    public static class MultiDimensionalArrayExtensions
-    {
-        /// <summary>
-        ///   Orders the two dimensional array by the provided key in the key selector.
-        /// </summary>
-        /// <typeparam name="T">The type of the source two-dimensional array.</typeparam>
-        /// <param name="source">The source two-dimensional array.</param>
-        /// <param name="keySelector">The selector to retrieve the column to sort on.</param>
-        /// <returns>A new two dimensional array sorted on the key.</returns>
-        public static T[,] OrderBy<T>(this T[,] source, Func<T[], T> keySelector)
-        {
-            return source.ConvertToSingleDimension().OrderBy(keySelector).ConvertToMultiDimensional();
-        }
-        /// <summary>
-        ///   Orders the two dimensional array by the provided key in the key selector in descending order.
-        /// </summary>
-        /// <typeparam name="T">The type of the source two-dimensional array.</typeparam>
-        /// <param name="source">The source two-dimensional array.</param>
-        /// <param name="keySelector">The selector to retrieve the column to sort on.</param>
-        /// <returns>A new two dimensional array sorted on the key.</returns>
-        public static T[,] OrderByDescending<T>(this T[,] source, Func<T[], T> keySelector)
-        {
-            return source.ConvertToSingleDimension().
-                OrderByDescending(keySelector).ConvertToMultiDimensional();
-        }
-        /// <summary>
-        ///   Converts a two dimensional array to single dimensional array.
-        /// </summary>
-        /// <typeparam name="T">The type of the two dimensional array.</typeparam>
-        /// <param name="source">The source two dimensional array.</param>
-        /// <returns>The repackaged two dimensional array as a single dimension based on rows.</returns>
-        private static IEnumerable<T[]> ConvertToSingleDimension<T>(this T[,] source)
-        {
-            T[] arRow;
-
-            for (int row = 0; row < source.GetLength(0); ++row)
-            {
-                arRow = new T[source.GetLength(1)];
-
-                for (int col = 0; col < source.GetLength(1); ++col)
-                    arRow[col] = source[row, col];
-
-                yield return arRow;
-            }
-        }
-        /// <summary>
-        ///   Converts a collection of rows from a two dimensional array back into a two dimensional array.
-        /// </summary>
-        /// <typeparam name="T">The type of the two dimensional array.</typeparam>
-        /// <param name="source">The source collection of rows to convert.</param>
-        /// <returns>The two dimensional array.</returns>
-        private static T[,] ConvertToMultiDimensional<T>(this IEnumerable<T[]> source)
-        {
-            T[,] twoDimensional;
-            T[][] arrayOfArray;
-            int numberofColumns;
-
-            arrayOfArray = source.ToArray();
-            numberofColumns = (arrayOfArray.Length > 0) ? arrayOfArray[0].Length : 0;
-            twoDimensional = new T[arrayOfArray.Length, numberofColumns];
-
-            for (int row = 0; row < arrayOfArray.GetLength(0); ++row)
-                for (int col = 0; col < numberofColumns; ++col)
-                    twoDimensional[row, col] = arrayOfArray[row][col];
-
-            return twoDimensional;
-        }
     }
 
 
