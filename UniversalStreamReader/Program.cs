@@ -1,24 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
-using System.Data.SQLite;
-using Confluent.Kafka.Serialization;
-using Confluent.Kafka;
-
 
 namespace UniversalStreamReader
 {
-    class Program
+    public class Program
     {
 
         const string DATABASE_FILE = @"c:\tempDev\DBPersist.sqlite";
         const string PERSISTENCE_FILE = @"c:\tempDev\FilePersist.csv";
         const string STREAM_SERVERS = "192.168.1.118:9092";
         const int RINGBUFFER_SIZE = 5;
+         // for unit + integration tests
 
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
+
+            // decide number of times to poll with consumer
+            int pollRepeat = (args.Length > 0) ? Convert.ToInt32(args[0]) : -1; // -1 is infinite poll
 
             List<string> topicsToConsume = new List<string>();
             topicsToConsume.Add("maintopic"); // only subscribing to one topic for PoC
@@ -31,7 +29,7 @@ namespace UniversalStreamReader
             IStreamConsumer sck = new StreamConsumer_Kafka(imc, ip); // create new StreamConsumer with ringbuffer 
                                                                      //  and PoC persistence types
             
-            sck.Run_Poll(STREAM_SERVERS, topicsToConsume); //start main loop to consume kafka cluster
+            sck.Run_Poll(STREAM_SERVERS, topicsToConsume, pollRepeat); //start main loop to consume kafka cluster
 
         }
     }

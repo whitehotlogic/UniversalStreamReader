@@ -68,7 +68,7 @@ namespace KafkaProducer
 
                     var deliveryReport = producer.ProduceAsync(topicName, key, val);
                     var result = deliveryReport.Result; // synchronously waits for message to be produced.
-                    Console.WriteLine($"Partition: {result.Partition}, Offset: {result.Offset}");
+                    Console.WriteLine($"SUCCESS: {key} {val} Partition: {result.Partition}, Offset: {result.Offset}");
                 }
             }
         }

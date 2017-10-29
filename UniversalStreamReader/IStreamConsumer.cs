@@ -4,6 +4,6 @@ namespace UniversalStreamReader
 {
     public interface IStreamConsumer
     {
-        void Run_Poll(string server, List<string> topicList);
+        int Run_Poll(string server, List<string> topicList, int pollRepeat);
     }
 }

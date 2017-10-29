@@ -12,7 +12,6 @@ namespace UniversalStreamReader
         private ICache imc;
         private IPersist[] ip;
 
-
         public StreamConsumer_Kafka(ICache imc, IPersist[] ip)
         {
             this.imc = imc;
@@ -35,8 +34,8 @@ namespace UniversalStreamReader
             }
         };
 
-        //TODO: dependency inject consumer so that Run_Poll can be tested without communication with kafka
-        public void Run_Poll(string brokerList, List<string> topics)
+        //TODO: dependency inject "new Consumer" so that Run_Poll can be tested without communication with kafka
+        public int Run_Poll(string brokerList, List<string> topics, int pollRepeat)
         {
 
             using (var consumer = new Consumer<string, string>(constructConfig(brokerList, true), new StringDeserializer(Encoding.UTF8), new StringDeserializer(Encoding.UTF8)))
@@ -100,12 +99,18 @@ namespace UniversalStreamReader
                 };
 
                 Console.WriteLine("Ctrl-C to exit.");
+
                 while (!cancelled)
                 {
                     //Console.WriteLine("DEBUG: Client is polling");
                     consumer.Poll(TimeSpan.FromMilliseconds(100));
 
+                    //if (isTest && isTestLoopTries-- == 0) break; // only poll # of isTestLoopTries if testing
+                    if (pollRepeat != -1)
+                        if (pollRepeat-- <= 0) break;
                 }
+
+                return 0;
             }
         }
     }
