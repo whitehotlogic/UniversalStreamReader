@@ -19,22 +19,6 @@ namespace UniversalStreamReader
             // REFACTOR TODO: split db conn, table creates, inserts into different methods
             //     -- can be better refactored as a repository
 
-
-            /*
-            // create db if it doesn't already exists
-            try
-            {
-                if (!File.Exists(dbFilePath))
-                    SQLiteConnection.CreateFile(dbFilePath);
-                // IS THE ABOVE EVEN NECESSARY? DOESN'T SQLITCONNECTION DO THIS AUTOMAGICALLY?
-            }
-            catch (IOException e)
-            {
-                Console.WriteLine("ERROR: Problem creating database file -- " + e.Message);
-            }
-            */
-
-
             // connect to db and create necessary objects
             SQLiteConnection dbConnection = new SQLiteConnection("Data Source=" + dbFilePath + ";Version=3;");
             dbConnection.Open();
@@ -71,6 +55,7 @@ namespace UniversalStreamReader
                 Console.WriteLine("ERROR: Problem inserting message -- " + e.Message);
             }
 
+            dbConnection.Close();
             Console.WriteLine("INFO: Message persisted to SQLite database: " + dbFilePath);
 
         }

@@ -23,7 +23,6 @@ namespace UniversalStreamReader
             catch (IOException e)
             {
                 Console.WriteLine("ERROR: Could not create cache persistence file -- " + e.Message);
-                throw new Exception("Unable to persist message to file");
             }
 
             using (System.IO.StreamWriter persistFile = new System.IO.StreamWriter(persistenceFilePath, true))

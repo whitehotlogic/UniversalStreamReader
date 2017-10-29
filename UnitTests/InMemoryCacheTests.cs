@@ -6,7 +6,7 @@ namespace UniversalStreamReader.Tests
     [TestClass()]
     public class InMemoryCacheTests
     {
-        [TestMethod()]
+        [TestMethod()] // test constructor
         public void InMemoryCacheTest()
         {
             ICache imc = new InMemoryCache(5);
@@ -16,9 +16,10 @@ namespace UniversalStreamReader.Tests
             }
         }
 
-        [TestMethod()]
+        [TestMethod()] // test primary functionality
         public void addMessageTest()
         {
+            // TODO
             Assert.Fail();
         }
     }

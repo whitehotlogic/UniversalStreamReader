@@ -1,10 +1,7 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using UniversalStreamReader;
 using System.IO;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System;
 
 namespace UniversalStreamReader.Tests
 {
@@ -12,9 +9,9 @@ namespace UniversalStreamReader.Tests
     public class SQLitePersistTests
     {
 
-        const string dbpath = @"c:\temp\tempdb.sqlite";
+        const string dbpath = @"c:\tempDev\testdb.sqlite";
 
-        [TestMethod()]
+        [TestMethod()] // test constructor
         public void SQLitePersistTest()
         {
             IPersist sqlp = new SQLitePersist("");
@@ -23,12 +20,12 @@ namespace UniversalStreamReader.Tests
                 Assert.Fail();
         }
 
-        [TestMethod()]
+        [TestMethod()] // test primary functionality
         public void PersistTest()
-        {
-            
+        {   
             IPersist sqlp = new SQLitePersist(dbpath);
-            sqlp.Persist("topic","message","0");
+            sqlp.Persist("topic","messageKey", "messageValue",0);
+            sqlp = null;
 
             if (!File.Exists(dbpath))
                 Assert.Fail();
@@ -37,8 +34,11 @@ namespace UniversalStreamReader.Tests
         [TestCleanup()]
         public void Teardown()
         {
+            GC.Collect(); // garbage collect
+            GC.WaitForPendingFinalizers(); // wait for database connection to be nulled
+
             if (File.Exists(dbpath))
-                File.Delete(dbpath);
+                File.Delete(dbpath); // remove test database
         }
     }
 }

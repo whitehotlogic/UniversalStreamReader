@@ -27,7 +27,7 @@ namespace UniversalStreamReader.Tests
             }
         }
 
-        [TestMethod()]
+        [TestMethod()] // test primary functionality
         public void Run_PollTest()
         {
             // TODO

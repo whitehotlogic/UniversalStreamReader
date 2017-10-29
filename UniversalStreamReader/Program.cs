@@ -23,16 +23,16 @@ namespace UniversalStreamReader
             List<string> topicsToConsume = new List<string>();
             topicsToConsume.Add("maintopic"); // only subscribing to one topic for PoC
 
-            IPersist[] ip = new IPersist[] {
+            IPersist[] ip = new IPersist[] { // all available types of persistence (easy to add more)
                 new FilePersist(PERSISTENCE_FILE),
                 new SQLitePersist(DATABASE_FILE)
             };
-            ICache imc = new InMemoryCache(RINGBUFFER_SIZE);
-            IStreamConsumer sck = new StreamConsumer_Kafka(imc, ip);
+            ICache imc = new InMemoryCache(RINGBUFFER_SIZE); // create in-memory cache
+            IStreamConsumer sck = new StreamConsumer_Kafka(imc, ip); // create new StreamConsumer with ringbuffer 
+                                                                     //  and PoC persistence types
+            
+            sck.Run_Poll(STREAM_SERVERS, topicsToConsume); //start main loop to consume kafka cluster
 
-            //main loop to consume kafka cluster
-            sck.Run_Poll(STREAM_SERVERS, topicsToConsume);
-           
         }
     }
    

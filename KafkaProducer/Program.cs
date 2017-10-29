@@ -7,12 +7,8 @@ using System.IO;
 
 namespace KafkaProducer
 {
-    class Program
+    public class Program
     {
-
-        // producer always posts to topicName in UI even when other topic specified
-        // 
-
 
         public static void Main(string[] args)
         {
@@ -20,7 +16,6 @@ namespace KafkaProducer
             const string topicName = "maintopic"; // args[1];
 
             var config = new Dictionary<string, object> { { "bootstrap.servers", BOOTSTRAP_SERVERS } };
-
 
             using (var producer = new Producer<string, string>(config, new StringSerializer(Encoding.UTF8), new StringSerializer(Encoding.UTF8)))
             {
@@ -33,7 +28,7 @@ namespace KafkaProducer
                 Console.WriteLine("> value<enter>");
                 Console.WriteLine("Ctrl-C to quit.\n");
 
-                var cancelled = false;
+                bool cancelled = false;
                 Console.CancelKeyPress += (_, e) => {
                     e.Cancel = true; // prevent the process from terminating.
                     cancelled = true;
@@ -41,7 +36,7 @@ namespace KafkaProducer
 
                 while (!cancelled)
                 {
-                    Console.Write("> ");
+                    Console.Write("> "); // prompt
 
                     string text;
                     try
